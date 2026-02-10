@@ -15,11 +15,19 @@ def cli():
 @cli.command()
 @click.option('--config', default='config/base_config.yaml', help='Path to config file.')
 @click.option('--output', default='outputs/', help='Directory to save results.')
-def train(config, output):
+@click.option('--epochs', type=int, help='Override number of epochs.')
+@click.option('--lr', type=float, help='Override learning rate.')
+def train(config, output, epochs, lr):
     """Train the EEGNet model."""
     # Load config
     with open(config, 'r') as f:
         cfg = yaml.safe_load(f)
+    
+    # Override config with CLI arguments if provided
+    if epochs:
+        cfg['training']['epochs'] = epochs
+    if lr:
+        cfg['training']['lr'] = lr
     
     if not os.path.exists(output):
         os.makedirs(output)
