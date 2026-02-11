@@ -2,6 +2,7 @@ model:
   f1: 8
   d: 2
   f2: 16
+  kern_length: 64
   dropout: 0.5
   nb_classes: 4
   chans: 22
@@ -12,3 +13,9 @@ training:
   lr: 0.001
   epochs: 100
   patience: 20
+  weight_decay: 0.0001
+  seed: 42
+
+augmentation:
+  noise_std: 0.01
+  max_shift: 10

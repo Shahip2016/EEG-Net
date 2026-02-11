@@ -1,6 +1,7 @@
 import click
 import yaml
 import torch
+import numpy as np
 from src.model import EEGNet
 from src.data import get_dataloaders, generate_synthetic_data
 from src.train import Trainer
@@ -17,36 +18,60 @@ def cli():
 @click.option('--output', default='outputs/', help='Directory to save results.')
 @click.option('--epochs', type=int, help='Override number of epochs.')
 @click.option('--lr', type=float, help='Override learning rate.')
-def train(config, output, epochs, lr):
-    """Train the EEGNet model."""
+@click.option('--seed', type=int, help='Set random seed for reproducibility.')
+def train(config, output, epochs, lr, seed):
+    """Train the EEGNet model with robust configuration and seed control."""
     # Load config
+    if not os.path.exists(config):
+        print(f"Error: Config file not found at {config}")
+        return
+        
     with open(config, 'r') as f:
         cfg = yaml.safe_load(f)
     
     # Override config with CLI arguments if provided
-    if epochs:
-        cfg['training']['epochs'] = epochs
-    if lr:
-        cfg['training']['lr'] = lr
+    if epochs: cfg['training']['epochs'] = epochs
+    if lr: cfg['training']['lr'] = lr
+    if seed: cfg['training']['seed'] = seed
+    
+    # Set seeds for reproducibility
+    target_seed = cfg['training'].get('seed', 42)
+    torch.manual_seed(target_seed)
+    np.random.seed(target_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(target_seed)
     
     if not os.path.exists(output):
-        os.makedirs(output)
+        os.makedirs(output, exist_ok=True)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    print(f"Using device: {device} | Seed: {target_seed}")
     
-    # Generate synthetic data for demonstration (BCI IV-2a style)
-    print("Generating synthetic data for demonstration...")
-    train_data, train_labels = generate_synthetic_data(n_samples=500, chans=cfg['model']['chans'], samples=cfg['model']['samples'])
-    val_data, val_labels = generate_synthetic_data(n_samples=100, chans=cfg['model']['chans'], samples=cfg['model']['samples'])
+    # Generate synthetic data
+    print("Generating synthetic data...")
+    train_data, train_labels = generate_synthetic_data(
+        n_samples=500, 
+        chans=cfg['model']['chans'], 
+        samples=cfg['model']['samples']
+    )
+    val_data, val_labels = generate_synthetic_data(
+        n_samples=100, 
+        chans=cfg['model']['chans'], 
+        samples=cfg['model']['samples']
+    )
     
-    train_loader, val_loader = get_dataloaders(train_data, train_labels, val_data, val_labels, batch_size=cfg['training']['batch_size'])
+    train_loader, val_loader = get_dataloaders(
+        train_data, train_labels, 
+        val_data, val_labels, 
+        batch_size=cfg['training']['batch_size']
+    )
     
     # Initialize model
     model = EEGNet(
         chans=cfg['model']['chans'],
         samples=cfg['model']['samples'],
         dropout_rate=cfg['model']['dropout'],
+        kern_length=cfg['model'].get('kern_length', 64),
         f1=cfg['model']['f1'],
         d=cfg['model']['d'],
         f2=cfg['model']['f2'],
