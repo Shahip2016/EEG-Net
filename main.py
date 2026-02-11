@@ -56,9 +56,14 @@ def train(config, output, epochs, lr):
     trainer = Trainer(model, train_loader, val_loader, cfg['training'], device=device)
     
     print("Starting training...")
-    best_acc = trainer.train(epochs=cfg['training']['epochs'], checkpoint_path=os.path.join(output, 'best_model.pth'))
+    history = trainer.train(epochs=cfg['training']['epochs'], checkpoint_path=os.path.join(output, 'best_model.pth'))
     
-    print(f"Training completed. Best Val Acc: {best_acc:.2f}%")
+    print(f"Training completed. Best Val Acc: {trainer.best_val_acc:.2f}%")
+    
+    # Plot training history
+    print("Plotting training history...")
+    plot_training_history(history, save_path=os.path.join(output, 'training_history.png'))
+    print(f"Training history plot saved to {os.path.join(output, 'training_history.png')}")
 
 @cli.command()
 @click.option('--model_path', required=True, help='Path to saved model.')

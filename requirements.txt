@@ -6,3 +6,5 @@ pandas
 pyyaml
 scikit-learn
 click
+tqdm
+seaborn
