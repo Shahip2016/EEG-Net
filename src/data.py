@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader, TensorDataset
+from scipy.signal import butter, lfilter
 
 class EEGDataset(Dataset):
     """
@@ -27,17 +27,21 @@ class EEGDataset(Dataset):
         sample = self.data[idx]
         label = self.labels[idx]
         
+        # Ensure sample is (C, S)
+        if sample.dim() == 3: # (1, C, S)
+            sample = sample.squeeze(0)
+            
         if self.transform:
             sample = self.transform(sample)
             
         return sample, label
 
-def get_dataloaders(train_data, train_labels, val_data, val_labels, batch_size=64):
+def get_dataloaders(train_data, train_labels, val_data, val_labels, batch_size=64, transform=None):
     """
     Creates DataLoaders for training and validation sets.
     """
     # Using TensorDataset for faster performance when no complex transform is needed
-    train_dataset = EEGDataset(train_data, train_labels)
+    train_dataset = EEGDataset(train_data, train_labels, transform=transform)
     val_dataset = EEGDataset(val_data, val_labels)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
@@ -54,6 +58,43 @@ def time_shift(data, shift_max=10):
     """Randomly shift the EEG signal along the time axis."""
     shift = np.random.randint(-shift_max, shift_max)
     return torch.roll(data, shifts=shift, dims=-1)
+
+def band_pass_filter(data, lowcut=0.1, highcut=40, fs=128, order=5):
+    """
+    Apply a Butterworth band-pass filter to the EEG data.
+    """
+    nyquist = 0.5 * fs
+    low = lowcut / nyquist
+    high = highcut / nyquist
+    b, a = butter(order, [low, high], btype='band')
+    
+    # Apply filter across the last dimension (samples)
+    filtered_data = lfilter(b, a, data.cpu().numpy(), axis=-1)
+    return torch.from_numpy(filtered_data.copy()).float()
+
+def channel_dropout(data, drop_rate=0.1):
+    """
+    Randomly drops (sets to zero) some EEG channels.
+    """
+    if np.random.rand() > drop_rate:
+        return data
+        
+    chans = data.size(0)
+    drop_idx = np.random.randint(0, chans)
+    data_dropped = data.clone()
+    data_dropped[drop_idx, :] = 0
+    return data_dropped
+
+def get_augmentation_pipeline(noise_std=0.01, shift_max=10, drop_rate=0.1):
+    """
+    Returns a combined augmentation pipeline.
+    """
+    def augment(data):
+        data = add_gaussian_noise(data, std=noise_std)
+        data = time_shift(data, shift_max=shift_max)
+        data = channel_dropout(data, drop_rate=drop_rate)
+        return data
+    return augment
 
 def generate_synthetic_data(n_samples=100, chans=22, samples=1125, n_classes=4):
     """
