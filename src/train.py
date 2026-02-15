@@ -4,7 +4,8 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 import os
-from typing import Dict, List, Tuple
+import wandb
+from typing import Dict, List, Tuple, Optional
 
 class Trainer:
     """
@@ -22,6 +23,12 @@ class Trainer:
         
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=config['lr'])
+        
+        # W&B Integration
+        self.use_wandb = config.get('use_wandb', False)
+        if self.use_wandb:
+            wandb.init(project=config.get('wandb_project', 'EEG-Net'), config=config)
+            wandb.watch(self.model)
         
         # Learning Rate Scheduler
         self.scheduler = ReduceLROnPlateau(
@@ -116,6 +123,16 @@ class Trainer:
                 print(f"--> Saved best model with Val Acc: {val_acc:.2f}%")
             else:
                 self.patience_counter += 1
+                
+            if self.use_wandb:
+                wandb.log({
+                    'epoch': epoch + 1,
+                    'train_loss': train_loss,
+                    'train_acc': train_acc,
+                    'val_loss': val_loss,
+                    'val_acc': val_acc,
+                    'lr': self.optimizer.param_groups[0]['lr']
+                })
                 
             if self.patience_counter >= self.config.get('patience', 20):
                 print(f"Early stopping triggered after {epoch+1} epochs.")
