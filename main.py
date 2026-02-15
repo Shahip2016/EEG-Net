@@ -3,7 +3,7 @@ import yaml
 import torch
 import numpy as np
 from src.model import EEGNet
-from src.data import get_dataloaders, generate_synthetic_data
+from src.data import get_dataloaders, generate_synthetic_data, get_augmentation_pipeline
 from src.train import Trainer
 from src.utils import plot_training_history, plot_confusion_matrix, get_performance_report
 import os
@@ -19,7 +19,12 @@ def cli():
 @click.option('--epochs', type=int, help='Override number of epochs.')
 @click.option('--lr', type=float, help='Override learning rate.')
 @click.option('--seed', type=int, help='Set random seed for reproducibility.')
-def train(config, output, epochs, lr, seed):
+@click.option('--augment', is_flag=True, help='Enable data augmentation.')
+@click.option('--noise_std', type=float, default=0.01, help='Gaussian noise standard deviation.')
+@click.option('--drop_rate', type=float, default=0.1, help='Channel dropout rate.')
+@click.option('--wandb', is_flag=True, help='Enable Weights & Biases logging.')
+@click.option('--wandb_project', default='EEG-Net', help='W&B project name.')
+def train(config, output, epochs, lr, seed, augment, noise_std, drop_rate, wandb, wandb_project):
     """Train the EEGNet model with robust configuration and seed control."""
     # Load config
     if not os.path.exists(config):
@@ -33,6 +38,9 @@ def train(config, output, epochs, lr, seed):
     if epochs: cfg['training']['epochs'] = epochs
     if lr: cfg['training']['lr'] = lr
     if seed: cfg['training']['seed'] = seed
+    
+    cfg['training']['use_wandb'] = wandb
+    cfg['training']['wandb_project'] = wandb_project
     
     # Set seeds for reproducibility
     target_seed = cfg['training'].get('seed', 42)
@@ -60,10 +68,16 @@ def train(config, output, epochs, lr, seed):
         samples=cfg['model']['samples']
     )
     
+    transform = None
+    if augment:
+        print(f"Data augmentation enabled (noise_std={noise_std}, drop_rate={drop_rate})")
+        transform = get_augmentation_pipeline(noise_std=noise_std, drop_rate=drop_rate)
+        
     train_loader, val_loader = get_dataloaders(
         train_data, train_labels, 
         val_data, val_labels, 
-        batch_size=cfg['training']['batch_size']
+        batch_size=cfg['training']['batch_size'],
+        transform=transform
     )
     
     # Initialize model
@@ -126,8 +140,42 @@ def evaluate(model_path, config):
     print("Classification Report:")
     print(report)
     
-    plot_confusion_matrix(y_true, y_pred, [f"Class {i}" for i in range(cfg['model']['nb_classes'])])
-    print("Confusion matrix saved to plots/confusion_matrix.png")
+    # Save report
+    report_path = os.path.join(os.path.dirname(model_path), 'classification_report.txt')
+    with open(report_path, 'w') as f:
+        f.write(report)
+    print(f"Report saved to {report_path}")
+    
+    cm_path = os.path.join(os.path.dirname(model_path), 'confusion_matrix.png')
+    plot_confusion_matrix(y_true, y_pred, [f"Class {i}" for i in range(cfg['model']['nb_classes'])], save_path=cm_path)
+    print(f"Confusion matrix saved to {cm_path}")
+
+@cli.command()
+@click.option('--model_path', required=True, help='Path to saved PyTorch model.')
+@click.option('--config', default='config/base_config.yaml', help='Path to config file.')
+@click.option('--output', default='outputs/exported_model.pt', help='Path to save exported TorchScript model.')
+def export(model_path, config, output):
+    """Export a trained model to TorchScript for production."""
+    with open(config, 'r') as f:
+        cfg = yaml.safe_load(f)
+    
+    device = torch.device('cpu') # Export for CPU by default
+    
+    model = EEGNet(
+        chans=cfg['model']['chans'],
+        samples=cfg['model']['samples'],
+        nb_classes=cfg['model']['nb_classes']
+    )
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    
+    # Trace the model
+    example_input = torch.randn(1, 1, cfg['model']['chans'], cfg['model']['samples'])
+    traced_model = torch.jit.trace(model, example_input)
+    
+    os.makedirs(os.path.dirname(output), exist_ok=True)
+    traced_model.save(output)
+    print(f"Model exported to TorchScript at {output}")
 
 if __name__ == "__main__":
     cli()
